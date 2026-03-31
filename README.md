@@ -14,7 +14,7 @@ Python is required. Install dependencies in terminal with:
 
 Once running, open your browser and navigate to:
 
-    https://127.0.0.1:8050
+    http://127.0.0.1:8050/
 
 ## Data
 
