@@ -18,7 +18,7 @@ Once running, open your browser and navigate to:
 
 ## Data
 
-he dataset (`final_nhs_full.csv`) is a cleaned and consolidated version of the NHS HES Primary Diagnosis 3-character files, spanning 1998–2023. Raw data is publicly available from NHS Digital.
+The dataset (`final_nhs_full.csv`) is a cleaned and consolidated version of the NHS HES Primary Diagnosis 3-character files, spanning 1998–2023. Raw data is publicly available.
 
 ## Features
 
