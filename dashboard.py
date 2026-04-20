@@ -3,12 +3,13 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output
+import textwrap
  
  
-# Colour palette ___________________________________________________________
+# Colour palette
+# These are the colours used for the dashboard and surrounding asthetics apart from the heatmap
+# The heatmap uses Cividis colours, to be accessible to people suffering from Deuteranopia and Protanopia
 
-# NHS brand colours used consistently across layout styles and chart theming.
-# Chosen using Paletton to ensure a harmonious and accessible palette.
 NHS_BLUE       = "#005EB8"
 NHS_DARK_BLUE  = "#003087"
 NHS_LIGHT_BLUE = "#41B6E6"
@@ -19,28 +20,27 @@ YELLOW         = "#FFB81C"
 RED            = "#8B0000"
  
  
-# Data loading _____________________________________________________________
-
-# replacing suppressed values with NaN.
-
+# Data loading
 df = pd.read_csv("final_nhs_full.csv")
-df.replace("-", np.nan, inplace=True)
-df["mean_length_stay"] = pd.to_numeric(df["mean_length_stay"], errors="coerce")
-df["admissions"]       = pd.to_numeric(df["admissions"],       errors="coerce")
-df["year"]             = pd.to_numeric(df["year"],             errors="coerce")
  
 # Sorted list of unique diagnostic categories used to populate the dropdown
 categories = sorted(df["category"].dropna().unique())
  
  
-# App initialisation ____________________________________________________________
-
+# Dashboard initialisation
 app = Dash(__name__, external_stylesheets=[
     "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap"
 ])
  
  
-# Functions ____________________________________________________________________
+# Functions - used throughout the dashboard
+
+def wrap_label(text, width=20):
+    """
+    Breaks down long pieces of text into sections,
+    so the text can appear on multiple lines.
+    """
+    return "<br>".join(textwrap.wrap(text, width))
  
 def card_style(width, extra=None):
     """
@@ -157,11 +157,11 @@ def get_ordered_codes(filtered, top5_codes, sort_method):
     return top5_codes
  
  
-# Layout __________________________________________________________________
+# Dashboard layout
  
 app.layout = html.Div([
  
-    # Header bar with NHS branding
+    # Header bar
     html.Div([
         html.Div([
             html.Span("COMP4037", style={
@@ -216,7 +216,7 @@ app.layout = html.Div([
             }
         ),
  
-        # Category dropdown and sort method radio buttons
+        # Category dropdown and sort method buttons
         html.Div([
  
             html.Div([
@@ -274,7 +274,7 @@ app.layout = html.Div([
         # Summary statistic cards
         html.Div(id="summary-stats", style={"marginBottom": "20px"}),
  
-        # Heatmap (left) and line chart (right)
+        # Heatmap and line chart (left and right)
         html.Div([
  
             html.Div([
@@ -336,7 +336,8 @@ app.layout = html.Div([
 ], style={"backgroundColor": LIGHT_GREY, "fontFamily": "Inter, Arial, sans-serif"})
  
  
-# Dash Callbacks ____________________________________________________________________________
+# Dash Callbacks
+# Updates the dashboard to reflect the users selected criteria.
  
 @app.callback(
     Output("summary-stats", "children"),
@@ -397,6 +398,10 @@ def update_summary(selected_category, sort_method):
     if len(longest_desc) > 30:
         longest_desc = longest_desc[:30] + "..."
  
+
+   # Statistic cards
+   # found above the heatmap, presenting insight into the selected diagnosis category
+
     def stat_card(label, value, sub=None):
         """
         Returns a styled html.Div representing a single summary statistic card
@@ -459,65 +464,103 @@ def update_summary(selected_category, sort_method):
         ),
     ])
  
- 
+
+# Heat map 
+# Uses Cividis colour scale to ensure accessiblity to the most common colour blind types: Deuteranopia and Protanopia
+
 @app.callback(
     Output("heatmap", "figure"),
     Input("category-dropdown", "value"),
     Input("sort-method", "value")
 )
 def update_heatmap(selected_category, sort_method):
-    """
-    Dash callback that renders the heatmap figure based on the selected
-    diagnostic category and sort method. Filters the dataset to the relevant
-    conditions, builds a pivot table of mean LOS by diagnosis and year, orders
-    the rows via get_ordered_codes(), and returns a styled Plotly heatmap
-    with full-description hover tooltips and NHS branding.
-    """
- 
+
     filtered   = df[df["category"] == selected_category]
+    
     top5_codes = analytics(filtered, sort_method)
     top5_df    = filtered[filtered["diagnosis_code"].isin(top5_codes)]
- 
+
     code_to_label = (top5_df.groupby("diagnosis_code")["description"]
-                     .first()
-                     .str.slice(0, 30)
-                     .add("...")
-                     .to_dict())
- 
+                    .first()
+                    .apply(wrap_label)
+                    .to_dict())
+
     summary = (top5_df.groupby(["year", "diagnosis_code"])["mean_length_stay"]
                .mean().reset_index())
- 
+
     pivot = summary.pivot(
         index="diagnosis_code", columns="year", values="mean_length_stay")
- 
-    # Build a matching description matrix for use in hover tooltips
+
     desc_matrix = (top5_df.groupby(["year", "diagnosis_code"])["description"]
                    .first().reset_index()
                    .pivot(index="diagnosis_code", columns="year",
                           values="description"))
- 
-    ordered     = get_ordered_codes(filtered, top5_codes, sort_method)
+
+    if sort_method == "admissions":
+        ordered = (filtered[filtered["diagnosis_code"].isin(top5_codes)]
+                   .groupby("diagnosis_code")["admissions"]
+                   .sum()
+                   .sort_values(ascending=False)
+                   .index.tolist())
+
+    elif sort_method == "bottom_admissions":
+        ordered = (filtered[filtered["diagnosis_code"].isin(top5_codes)]
+                   .groupby("diagnosis_code")["admissions"]
+                   .sum()
+                   .sort_values(ascending=True)
+                   .index.tolist())
+
+    elif sort_method == "highest_los":
+        ordered = (filtered[filtered["diagnosis_code"].isin(top5_codes)]
+                   .groupby("diagnosis_code")["mean_length_stay"]
+                   .mean()
+                   .sort_values(ascending=False)
+                   .index.tolist())
+
+    elif sort_method == "los_change":
+        def los_change_order(x):
+            valid = x.dropna(subset=["mean_length_stay"])
+            if len(valid) < 2:
+                return 0
+            return abs(
+                valid.loc[valid["year"].idxmax(), "mean_length_stay"] -
+                valid.loc[valid["year"].idxmin(), "mean_length_stay"]
+            )
+        ordered = (filtered[filtered["diagnosis_code"].isin(top5_codes)]
+                   .groupby("diagnosis_code")
+                   .apply(los_change_order)
+                   .sort_values(ascending=False)
+                   .index.tolist())
+
+    else:
+        ordered = top5_codes
+
     pivot       = pivot.reindex(ordered)
     desc_matrix = desc_matrix.reindex(index=ordered, columns=pivot.columns)
- 
+
     pivot.index       = pivot.index.map(code_to_label)
     desc_matrix.index = desc_matrix.index.map(code_to_label)
- 
+
+    sort_labels = {
+        "admissions"       : "Top 5 by Admission Volume",
+        "bottom_admissions": "Bottom 5 by Admission Volume",
+        "highest_los"      : "Top 5 by Highest Mean LOS",
+        "los_change"       : "Top 5 by Greatest LOS Change"
+    }
+
+    sort_labels = sort_labels.get(sort_method)
+
     fig = px.imshow(
         pivot,
+        range_color=[float(pivot.min().min()), float(pivot.max().max())],
         labels=dict(x="Year", y="Diagnosis",
                     color="Mean Length of Stay (Days)"),
-        title=f"Top 5 Diagnoses — {selected_category}",
-        color_continuous_scale=[
-            [0,   NHS_LIGHT_BLUE],
-            [0.3, WHITE],
-            [0.7, YELLOW],
-            [1,   RED]
-        ],
+        title=f"Mean Length of Stay: {sort_labels} for {selected_category} diagnoses (1998 - 2023)",
+        color_continuous_scale="Cividis",
         aspect="auto",
         text_auto=".1f"
     )
- 
+
     fig.update_layout(
         plot_bgcolor  = WHITE,
         paper_bgcolor = WHITE,
@@ -525,23 +568,23 @@ def update_heatmap(selected_category, sort_method):
                   color=DARK_GREY, size=12),
         title=dict(font=dict(size=15, color=NHS_DARK_BLUE), x=0.01),
         coloraxis_colorbar=dict(
-            title     = "Mean<br>LOS (Days)",
-            tickfont  = dict(color=DARK_GREY, size=11),
-            thickness = 14,
-            len       = 0.8
+            title      = "Mean<br>LOS (Days)",
+            tickfont   = dict(color=DARK_GREY, size=11),
+            thickness  = 14,
+            len        = 0.8
         ),
         margin     = dict(l=220, r=20, t=50, b=80),
         hoverlabel = dict(bgcolor=NHS_DARK_BLUE,
                           font_size=12, font_color=WHITE)
     )
- 
+
     fig.update_xaxes(
-        tickmode="linear", dtick=1, tickangle=45,
+        tickmode="linear", dtick=1, tickangle=90,
         tickfont=dict(color=DARK_GREY, size=11),
         title_font=dict(color=NHS_DARK_BLUE),
         gridcolor=LIGHT_GREY, linecolor=LIGHT_GREY
     )
- 
+
     fig.update_yaxes(
         title_text="",
         tickfont=dict(color=DARK_GREY, size=11),
@@ -549,20 +592,12 @@ def update_heatmap(selected_category, sort_method):
         ticksuffix="  ", ticklabelstandoff=10
     )
  
-    fig.update_traces(
-        customdata=desc_matrix.values,
-        textfont=dict(size=9, color="black"),
-        hovertemplate=(
-            "<b>%{customdata}</b><br>"
-            "Year: %{x}<br>"
-            "Mean LOS: %{z:.1f} days"
-            "<extra></extra>"
-        )
-    )
- 
     return fig
- 
- 
+    
+
+ # Line chart
+ # Found to the right of the heatmap. Dynamically updates to reflect which diagnosis code the user is currently looking at.
+
 @app.callback(
     Output("line-chart", "figure"),
     Input("heatmap", "hoverData"),
@@ -597,7 +632,6 @@ def update_line_chart(hoverData, selected_category, sort_method):
     desc_matches    = filtered[filtered["diagnosis_code"] == condition_code]["description"]
     condition_title = desc_matches.iloc[0] if len(desc_matches) > 0 else condition_code
  
-    # Aggregate mean LOS per year for the selected condition
     condition_df = filtered[filtered["diagnosis_code"] == condition_code]
     trend = (condition_df.groupby("year")["mean_length_stay"]
              .mean().reset_index())
@@ -646,6 +680,8 @@ def update_line_chart(hoverData, selected_category, sort_method):
  
     return fig
  
+ # Scatter plot
+ # Visualises the change in trends for which ever category and filter method have been selected
  
 @app.callback(
     Output("scatter-plot", "figure"),
@@ -664,7 +700,6 @@ def update_scatter(selected_category, sort_method):
     top5_names = analytics(filtered, sort_method)
     top5_df    = filtered[filtered["diagnosis_code"].isin(top5_names)]
  
-    # Aggregate admissions and mean LOS per condition per year for animation frames
     scatter_df = (top5_df.groupby(["year", "diagnosis_code", "description"])
                   .agg(
                       total_admissions=("admissions",       "sum"),
@@ -716,7 +751,6 @@ def update_scatter(selected_category, sort_method):
         gridcolor  = LIGHT_GREY, linecolor=LIGHT_GREY
     )
  
-    # Cap the y-axis at the 95th percentile to prevent outliers compressing the view
     fig.update_yaxes(
         range      = [0, df["mean_length_stay"].quantile(0.95)],
         tickfont   = dict(color=DARK_GREY, size=11),
