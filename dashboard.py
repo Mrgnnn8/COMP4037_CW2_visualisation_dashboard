@@ -617,10 +617,9 @@ def update_line_chart(hoverData, selected_category, sort_method):
     top5_df    = filtered[filtered["diagnosis_code"].isin(top5_codes)]
  
     code_to_label = (top5_df.groupby("diagnosis_code")["description"]
-                     .first()
-                     .str.slice(0, 30)
-                     .add("...")
-                     .to_dict())
+                 .first()
+                 .apply(wrap_label)
+                 .to_dict())
     label_to_code = {v: k for k, v in code_to_label.items()}
  
     if hoverData is None:
